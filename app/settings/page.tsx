@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTheme } from "next-themes";
 import { useStore } from "@/lib/store";
-import { Download, Upload } from "lucide-react";
+import { Download, Upload, ExternalLink, Info } from "lucide-react";
 import { storage } from "@/lib/storage/client";
 
 export default function SettingsPage() {
@@ -69,14 +69,41 @@ export default function SettingsPage() {
         </div>
       </Section>
 
-      <Section title="GitHub Token (PAT)" desc="用于访问私有仓库或提升 API 限额。仅本机持久化。">
+      <Section
+        title="GitHub Token (PAT)"
+        desc="GitHub 匿名接口限流 60 次/小时，极易用尽；填入 PAT 后提升到 5000 次/小时。读公开仓库无需额外权限。Token 只保存在本机。"
+      >
         <input
           type="password"
           defaultValue={settings.githubToken ?? ""}
           onBlur={(e) => save({ githubToken: e.target.value || undefined })}
-          placeholder="ghp_…"
+          placeholder="github_pat_… 或 ghp_…"
           className="w-full h-10 px-3 rounded-md bg-bg-elevated border border-border focus:border-border-strong outline-none text-sm font-mono"
         />
+
+        <div className="rounded-lg border border-border bg-bg-elevated px-4 py-3 space-y-2 text-[13px] text-fg-muted">
+          <div className="flex items-center gap-2 text-fg">
+            <Info className="size-4" />
+            <span className="font-medium">三步拿到 token</span>
+          </div>
+          <ol className="list-decimal pl-5 space-y-1">
+            <li>
+              点下方按钮 → <span className="text-fg">Repository access</span> 选{" "}
+              <code className="px-1 bg-bg-subtle rounded">Public Repositories (read-only)</code>
+            </li>
+            <li>拉到底点 <span className="text-fg">Generate token</span>（其它什么都不用填）</li>
+            <li>复制 <code className="px-1 bg-bg-subtle rounded">github_pat_…</code> 粘贴到上方输入框</li>
+          </ol>
+          <a
+            href="https://github.com/settings/personal-access-tokens/new"
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md bg-accent text-accent-foreground text-sm font-medium hover:opacity-90"
+          >
+            <ExternalLink className="size-4" />
+            打开 GitHub 创建页
+          </a>
+        </div>
       </Section>
 
       <Section title="Gitee Token" desc="可选，用于 Gitee 源。">
