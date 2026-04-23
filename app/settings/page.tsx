@@ -20,6 +20,25 @@ export default function SettingsPage() {
   useEffect(() => setMounted(true), []);
   const active = mounted ? theme ?? resolvedTheme : undefined;
 
+  const [envStatus, setEnvStatus] = useState<{ hasEnvGithub: boolean; hasEnvGitee: boolean } | null>(null);
+  useEffect(() => {
+    fetch("/api/token-status")
+      .then((r) => r.json())
+      .then(setEnvStatus)
+      .catch(() => setEnvStatus({ hasEnvGithub: false, hasEnvGitee: false }));
+  }, []);
+
+  const githubSource = settings.githubToken
+    ? "personal"
+    : envStatus?.hasEnvGithub
+      ? "env"
+      : "none";
+  const giteeSource = settings.giteeToken
+    ? "personal"
+    : envStatus?.hasEnvGitee
+      ? "env"
+      : "none";
+
   async function save(partial: Partial<typeof settings>) {
     await setSettings({ ...settings, ...partial });
     setSaved(true);
@@ -73,11 +92,16 @@ export default function SettingsPage() {
         title="GitHub Token (PAT)"
         desc="GitHub 匿名接口限流 60 次/小时，极易用尽；填入 PAT 后提升到 5000 次/小时。读公开仓库无需额外权限。Token 只保存在本机。"
       >
+        <TokenStatus source={githubSource} />
         <input
           type="password"
           defaultValue={settings.githubToken ?? ""}
           onBlur={(e) => save({ githubToken: e.target.value || undefined })}
-          placeholder="github_pat_… 或 ghp_…"
+          placeholder={
+            envStatus?.hasEnvGithub
+              ? "留空则使用服务端内置 token"
+              : "github_pat_… 或 ghp_…"
+          }
           className="w-full h-10 px-3 rounded-md bg-bg-elevated border border-border focus:border-border-strong outline-none text-sm font-mono"
         />
 
@@ -107,11 +131,12 @@ export default function SettingsPage() {
       </Section>
 
       <Section title="Gitee Token" desc="可选，用于 Gitee 源。">
+        <TokenStatus source={giteeSource} />
         <input
           type="password"
           defaultValue={settings.giteeToken ?? ""}
           onBlur={(e) => save({ giteeToken: e.target.value || undefined })}
-          placeholder=""
+          placeholder={envStatus?.hasEnvGitee ? "留空则使用服务端内置 token" : ""}
           className="w-full h-10 px-3 rounded-md bg-bg-elevated border border-border focus:border-border-strong outline-none text-sm font-mono"
         />
       </Section>
@@ -158,6 +183,31 @@ function Section({ title, desc, children }: { title: string; desc?: string; chil
       </div>
       {children}
     </section>
+  );
+}
+
+function TokenStatus({ source }: { source: "personal" | "env" | "none" }) {
+  if (source === "personal") {
+    return (
+      <div className="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+        <span className="size-1.5 rounded-full bg-emerald-500" />
+        当前使用你填写的 token
+      </div>
+    );
+  }
+  if (source === "env") {
+    return (
+      <div className="text-xs text-sky-600 dark:text-sky-400 flex items-center gap-1.5">
+        <span className="size-1.5 rounded-full bg-sky-500" />
+        当前使用服务端内置 token（你填写后会覆盖它）
+      </div>
+    );
+  }
+  return (
+    <div className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+      <span className="size-1.5 rounded-full bg-amber-500" />
+      未配置 token，匿名调用限流 60/hr
+    </div>
   );
 }
 
