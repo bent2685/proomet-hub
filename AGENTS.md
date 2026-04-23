@@ -132,13 +132,19 @@ title: 自定义标题           # 可选，缺省用文件名
 
 违反以下任一条即视为 PR 必须打回重写，不接受"已经写了就算了"。
 
-### 3.1 不落地任何 prompt 内容
+### 3.1 不把 prompt 内容当主数据
 
 proomet-hub 的核心定位是**聚合平台**，不是存储平台。
 
-- **严禁**把从源仓库拉到的 md 内容写入 `DATA_DIR` / 数据库 / 缓存文件。内存 TTL 缓存是允许的唯一落地形式。
-- **严禁**把源仓库文件做 fork / 镜像 / 快照 —— 用户撤掉源，平台就应彻底见不到内容。
-- `DATA_DIR` 只允许写三类：`sources.json`、`favorites.json`、`settings.json`。新增持久化项前必须在 AGENTS.md 这里登记并说明理由。
+- **严禁**把源仓库内容写入任何**永久性**存储（数据库、同步到外部、做 fork/镜像）。用户撤掉源，必须在下一次缓存失效前彻底消失。
+- **允许**以"带 TTL 的缓存"形式把拉取到的内容落盘（`DATA_DIR/cache.json`），原因：避免每次刷新都打 GitHub API（限流 60/hr），也避免 dev 环境进程重启丢缓存。
+- `DATA_DIR` **只允许**出现这四个文件：
+  - `sources.json` —— 已添加的 git 源
+  - `favorites.json` —— 收藏的 prompt id
+  - `settings.json` —— 主题外设置（PAT 等）
+  - `cache.json` —— **带 TTL 的** 聚合结果缓存，TTL 常量在 `lib/cache.ts::CACHE_TTL_MS`，目前 24h
+- 新增第五类必须在这里登记并说明理由。
+- 缓存的写入**只允许**走 `lib/cache.ts`；其它位置直接写 `cache.json` 属违规。
 
 ### 3.2 不引入重型依赖
 
