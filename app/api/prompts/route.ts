@@ -12,8 +12,8 @@ export async function POST(req: Request) {
     const body = (await req.json()) as Body;
     if (body.refresh) await invalidateCache();
     const { items, readmes, errors } = await fetchAllSources(body.sources ?? [], {
-      github: body.settings?.githubToken,
-      gitee: body.settings?.giteeToken,
+      github: body.settings?.githubToken || process.env.GITHUB_TOKEN || undefined,
+      gitee: body.settings?.giteeToken || process.env.GITEE_TOKEN || undefined,
     });
     return NextResponse.json({ items, readmes, errors });
   } catch (err) {
