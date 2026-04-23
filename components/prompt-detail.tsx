@@ -29,8 +29,9 @@ export function PromptDetail({ item, onClose }: { item: PromptItem | null; onClo
   const src = sources.find((s) => s.id === item.sourceId);
   const repoUrl = src ? `${src.url.replace(/\.git$/, "").replace(/\/$/, "")}/blob/${src.branch ?? "HEAD"}/${item.path}` : undefined;
 
+  const body = item.body;
   async function copyAll() {
-    await navigator.clipboard.writeText(item.body);
+    await navigator.clipboard.writeText(body);
     setCopied(true);
     setTimeout(() => setCopied(false), 1200);
   }

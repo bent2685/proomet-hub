@@ -13,6 +13,7 @@ export default function SourcesPage() {
   const reload = useStore((s) => s.reloadPrompts);
   const items = useStore((s) => s.items);
   const readmes = useStore((s) => s.readmes);
+  const errors = useStore((s) => s.errors);
   const [url, setUrl] = useState("");
   const [label, setLabel] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -71,7 +72,7 @@ export default function SourcesPage() {
           className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-border hover:border-border-strong text-xs"
         >
           <RefreshCw className="size-3.5" />
-          刷新
+          强制刷新
         </button>
       </div>
 
@@ -82,6 +83,7 @@ export default function SourcesPage() {
         {sources.map((s) => {
           const count = items.filter((it) => it.sourceId === s.id).length;
           const readme = readmes[s.id];
+          const error = errors[s.id];
           const isOpen = !!expanded[s.id];
           return (
             <li key={s.id} className="p-4">
@@ -104,6 +106,9 @@ export default function SourcesPage() {
                   <a href={s.url} target="_blank" rel="noreferrer" className="text-xs text-fg-subtle truncate block hover:underline">
                     {s.url}
                   </a>
+                  {error && (
+                    <div className="mt-1 text-xs text-amber-600 dark:text-amber-400 truncate">⚠ {error}</div>
+                  )}
                 </div>
                 <span className={clsx("text-xs", readme ? "text-fg-muted" : "text-fg-subtle")}>{count} md</span>
                 <button

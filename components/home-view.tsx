@@ -8,12 +8,17 @@ import { EmptyState } from "@/components/empty-state";
 import { Hero } from "@/components/hero";
 import { PromptDetail } from "@/components/prompt-detail";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { AlertTriangle, RefreshCw } from "lucide-react";
 
 export function HomeView() {
   const items = useStore((s) => s.items);
   const sources = useStore((s) => s.sources);
   const loading = useStore((s) => s.loading);
   const hydrated = useStore((s) => s.hydrated);
+  const errors = useStore((s) => s.errors);
+  const reload = useStore((s) => s.reloadPrompts);
+  const errorEntries = Object.entries(errors);
 
   const router = useRouter();
   const sp = useSearchParams();
@@ -49,12 +54,7 @@ export function HomeView() {
   }, [items, selected, query]);
 
   function toggle(tag: string) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(tag)) next.delete(tag);
-      else next.add(tag);
-      return next;
-    });
+    setSelected((prev) => (prev.has(tag) ? new Set() : new Set([tag])));
   }
 
   function openDetail(id: string) {
@@ -80,6 +80,34 @@ export function HomeView() {
           <EmptyState />
         ) : (
           <>
+            {errorEntries.length > 0 && (
+              <div className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-4 flex items-start gap-3">
+                <AlertTriangle className="size-5 text-amber-500 shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0 text-sm">
+                  <div className="font-medium text-amber-600 dark:text-amber-400">
+                    {errorEntries.length} 个源拉取失败
+                  </div>
+                  <ul className="mt-1 space-y-0.5 text-xs text-fg-muted">
+                    {errorEntries.map(([sid, msg]) => {
+                      const src = sources.find((s) => s.id === sid);
+                      return (
+                        <li key={sid} className="truncate">
+                          <span className="text-fg">{src?.label ?? sid}</span> — {msg}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {errorEntries.some(([, m]) => /403|401|限流|鉴权/i.test(m)) && (
+                    <p className="mt-2 text-xs text-fg-muted">
+                      看起来是 GitHub 匿名调用限流。到{" "}
+                      <Link href="/settings" className="underline text-fg">设置</Link>{" "}
+                      填一个 GitHub PAT 就能恢复。
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="flex items-center gap-3">
               <input
                 value={query}
@@ -87,7 +115,15 @@ export function HomeView() {
                 placeholder="搜索标题 / 描述 / tag / 作者 / 内容…"
                 className="flex-1 h-10 px-3 rounded-md bg-bg-elevated border border-border focus:border-border-strong outline-none text-sm"
               />
-              {loading && <span className="text-xs text-fg-subtle">loading…</span>}
+              <button
+                onClick={() => reload({ refresh: true })}
+                disabled={loading}
+                title="强制重新拉取所有源（每日 24h 自动过期，平时走本地缓存）"
+                className="inline-flex items-center gap-1.5 h-10 px-3 rounded-md border border-border hover:border-border-strong bg-bg-elevated text-sm disabled:opacity-50"
+              >
+                <RefreshCw className={loading ? "size-4 animate-spin" : "size-4"} />
+                强制刷新
+              </button>
             </div>
 
             {tagCounts.length > 0 && (
