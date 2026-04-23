@@ -209,40 +209,39 @@ export async function fetchSource(source: Source, tokens: Tokens): Promise<Fetch
 
   const label = source.label ?? `${owner}/${repo}`;
 
-  const [items, readme] = await Promise.all([
-    Promise.all(
-      promptFiles.map(async (f) => {
-        try {
-          const raw = await fetchRaw(host, owner, repo, branch, f.path, tokens);
-          const parsed = parseMd(raw, f.path);
-          const id = `${source.id}:${f.path}`;
-          return {
-            id,
-            sourceId: source.id,
-            sourceLabel: label,
-            path: f.path,
-            title: parsed.title,
-            tags: parsed.tags,
-            author: parsed.author,
-            desc: parsed.desc,
-            meta: parsed.meta,
-            body: parsed.body,
-            sha: f.sha,
-          } satisfies PromptItem;
-        } catch {
-          return null;
-        }
-      }),
-    ),
+  const fetchOne = async (f: TreeFile): Promise<PromptItem | null> => {
+    try {
+      const raw = await fetchRaw(host, owner, repo, branch, f.path, tokens);
+      const parsed = parseMd(raw, f.path);
+      return {
+        id: `${source.id}:${f.path}`,
+        sourceId: source.id,
+        sourceLabel: label,
+        path: f.path,
+        title: parsed.title,
+        tags: parsed.tags,
+        author: parsed.author,
+        desc: parsed.desc,
+        meta: parsed.meta,
+        body: parsed.body,
+        sha: f.sha,
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  const [rawItems, readme] = await Promise.all([
+    Promise.all(promptFiles.map(fetchOne)),
     readmeFile
       ? fetchRaw(host, owner, repo, branch, readmeFile.path, tokens).catch(() => undefined)
       : Promise.resolve(undefined),
   ]);
 
-  const result: FetchSourceResult = {
-    items: items.filter((x): x is PromptItem => !!x),
-    readme,
-  };
+  const items: PromptItem[] = [];
+  for (const it of rawItems) if (it) items.push(it);
+
+  const result: FetchSourceResult = { items, readme };
   await cacheSet(cacheKey, result);
   return result;
 }
