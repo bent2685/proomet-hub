@@ -11,3 +11,4 @@ data/
 # editor swap / Claude agent scratch
 *.swp
 CLAUDE.md
+tsconfig.tsbuildinfo
