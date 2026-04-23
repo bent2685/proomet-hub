@@ -10,6 +10,7 @@ type State = {
   settings: Settings;
   items: PromptItem[];
   readmes: Record<string, string>;
+  errors: Record<string, string>;
   loading: boolean;
   hydrated: boolean;
 
@@ -35,6 +36,7 @@ export const useStore = create<State>((set, get) => ({
   settings: {},
   items: [],
   readmes: {},
+  errors: {},
   loading: false,
   hydrated: false,
 
@@ -52,7 +54,7 @@ export const useStore = create<State>((set, get) => ({
   async reloadPrompts(opts) {
     const { sources, settings } = get();
     if (sources.length === 0) {
-      set({ items: [], readmes: {} });
+      set({ items: [], readmes: {}, errors: {} });
       return;
     }
     set({ loading: true });
@@ -62,8 +64,16 @@ export const useStore = create<State>((set, get) => ({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ sources, settings, refresh: !!opts?.refresh }),
       });
-      const json = (await res.json()) as { items: PromptItem[]; readmes?: Record<string, string> };
-      set({ items: json.items ?? [], readmes: json.readmes ?? {} });
+      const json = (await res.json()) as {
+        items: PromptItem[];
+        readmes?: Record<string, string>;
+        errors?: Record<string, string>;
+      };
+      set({
+        items: json.items ?? [],
+        readmes: json.readmes ?? {},
+        errors: json.errors ?? {},
+      });
     } finally {
       set({ loading: false });
     }
@@ -89,7 +99,7 @@ export const useStore = create<State>((set, get) => ({
     const next = [...get().sources, source];
     await storage.setSources(next);
     set({ sources: next });
-    await get().reloadPrompts({ refresh: true });
+    await get().reloadPrompts();
     return { ok: true };
   },
 
@@ -97,7 +107,7 @@ export const useStore = create<State>((set, get) => ({
     const next = get().sources.filter((s) => s.id !== id);
     await storage.setSources(next);
     set({ sources: next });
-    await get().reloadPrompts({ refresh: true });
+    await get().reloadPrompts();
   },
 
   async toggleFavorite(id) {
@@ -114,6 +124,6 @@ export const useStore = create<State>((set, get) => ({
   async setSettings(next) {
     await storage.setSettings(next);
     set({ settings: next });
-    await get().reloadPrompts({ refresh: true });
+    await get().reloadPrompts();
   },
 }));

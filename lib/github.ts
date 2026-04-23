@@ -1,29 +1,9 @@
 import matter from "gray-matter";
 import { UNCATEGORIZED_TAG, type FrontMatter, type PromptItem, type Source } from "@/lib/types";
+import { cacheGet, cacheSet, cacheInvalidate } from "@/lib/cache";
 
-const TTL = 10 * 60 * 1000;
-type CacheEntry<T> = { at: number; data: T };
-const cache = new Map<string, CacheEntry<unknown>>();
-
-function getCached<T>(key: string): T | null {
-  const hit = cache.get(key);
-  if (!hit) return null;
-  if (Date.now() - hit.at > TTL) {
-    cache.delete(key);
-    return null;
-  }
-  return hit.data as T;
-}
-function setCached<T>(key: string, data: T) {
-  cache.set(key, { at: Date.now(), data });
-}
-
-export function invalidateCache(prefix?: string) {
-  if (!prefix) {
-    cache.clear();
-    return;
-  }
-  for (const k of cache.keys()) if (k.startsWith(prefix)) cache.delete(k);
+export async function invalidateCache(prefix?: string) {
+  await cacheInvalidate(prefix);
 }
 
 export type Host = "github" | "gitee";
@@ -66,45 +46,51 @@ function authHeaders(host: Host, tokens: Tokens): HeadersInit {
   return h;
 }
 
-async function getDefaultBranch(host: Host, owner: string, repo: string, tokens: Tokens): Promise<string> {
-  const url =
-    host === "github"
-      ? `https://api.github.com/repos/${owner}/${repo}`
-      : `https://gitee.com/api/v5/repos/${owner}/${repo}${tokens.gitee ? `?access_token=${tokens.gitee}` : ""}`;
-  const res = await fetch(url, { headers: authHeaders(host, tokens) });
-  if (!res.ok) throw new Error(`repo meta ${res.status}`);
-  const json = (await res.json()) as { default_branch?: string; default_branch_name?: string };
-  return json.default_branch ?? json.default_branch_name ?? "main";
-}
-
 type TreeFile = { path: string; sha?: string };
 
-async function listMdFiles(
+async function tryListMdFiles(
   host: Host,
   owner: string,
   repo: string,
   branch: string,
   tokens: Tokens,
-): Promise<TreeFile[]> {
-  if (host === "github") {
-    const url = `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`;
-    const res = await fetch(url, { headers: authHeaders(host, tokens) });
-    if (!res.ok) throw new Error(`tree ${res.status}`);
-    const json = (await res.json()) as {
-      tree: { path: string; type: string; sha: string }[];
-    };
-    return json.tree
-      .filter((n) => n.type === "blob" && n.path.toLowerCase().endsWith(".md"))
-      .map((n) => ({ path: n.path, sha: n.sha }));
-  }
-  // Gitee: recurse via /repos/:owner/:repo/git/gitee/trees/:sha?recursive=1
-  const url = `https://gitee.com/api/v5/repos/${owner}/${repo}/git/trees/${branch}?recursive=1${tokens.gitee ? `&access_token=${tokens.gitee}` : ""}`;
+): Promise<{ ok: true; files: TreeFile[] } | { ok: false; status: number }> {
+  const url =
+    host === "github"
+      ? `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`
+      : `https://gitee.com/api/v5/repos/${owner}/${repo}/git/trees/${branch}?recursive=1${tokens.gitee ? `&access_token=${tokens.gitee}` : ""}`;
   const res = await fetch(url, { headers: authHeaders(host, tokens) });
-  if (!res.ok) throw new Error(`tree ${res.status}`);
-  const json = (await res.json()) as { tree: { path: string; type: string; sha: string }[] };
-  return json.tree
+  if (!res.ok) return { ok: false, status: res.status };
+  const json = (await res.json()) as { tree?: { path: string; type: string; sha: string }[] };
+  const files = (json.tree ?? [])
     .filter((n) => n.type === "blob" && n.path.toLowerCase().endsWith(".md"))
     .map((n) => ({ path: n.path, sha: n.sha }));
+  return { ok: true, files };
+}
+
+async function listMdFilesAndBranch(
+  host: Host,
+  owner: string,
+  repo: string,
+  preferred: string | undefined,
+  tokens: Tokens,
+): Promise<{ files: TreeFile[]; branch: string }> {
+  const candidates = [preferred, "main", "master"].filter(
+    (b, i, arr): b is string => !!b && arr.indexOf(b) === i,
+  );
+  let lastStatus = 0;
+  for (const branch of candidates) {
+    const r = await tryListMdFiles(host, owner, repo, branch, tokens);
+    if (r.ok) return { files: r.files, branch };
+    lastStatus = r.status;
+    if (r.status === 403 || r.status === 401) {
+      throw new Error(
+        `GitHub/Gitee API 限流或鉴权失败 (${r.status})。请到设置页配置 PAT Token。`,
+      );
+    }
+    if (r.status !== 404) throw new Error(`tree ${r.status}`);
+  }
+  throw new Error(`tree ${lastStatus || 404}：仓库不存在或默认分支不是 main/master。`);
 }
 
 async function fetchRaw(
@@ -130,8 +116,34 @@ async function fetchRaw(
 }
 
 function normalizeTags(input: unknown): string[] {
-  if (Array.isArray(input)) return input.filter((t): t is string => typeof t === "string").map((s) => s.trim()).filter(Boolean);
-  if (typeof input === "string") return input.split(",").map((s) => s.trim()).filter(Boolean);
+  if (Array.isArray(input)) {
+    return input
+      .map((t) => (typeof t === "string" ? t : typeof t === "number" ? String(t) : ""))
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+  if (typeof input === "string") {
+    return input.split(/[,，、\/|\s]+/).map((s) => s.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+function pickString(fm: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const k of keys) {
+    const v = fm[k];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return undefined;
+}
+
+function pickTags(fm: Record<string, unknown>): string[] {
+  for (const k of ["tags", "tag", "keywords", "keyword", "labels", "label"]) {
+    const v = fm[k];
+    if (v !== undefined && v !== null) {
+      const arr = normalizeTags(v);
+      if (arr.length) return arr;
+    }
+  }
   return [];
 }
 
@@ -143,16 +155,19 @@ function fileNameTitle(filePath: string): string {
 function parseMd(raw: string, filePath: string) {
   try {
     const parsed = matter(raw);
-    const fm = (parsed.data ?? {}) as FrontMatter;
-    const tags = normalizeTags(fm.tags);
+    const fm = (parsed.data ?? {}) as Record<string, unknown>;
+    const tags = pickTags(fm);
+    const title = pickString(fm, ["title", "name"]) ?? fileNameTitle(filePath);
+    const author = pickString(fm, ["author", "by", "creator", "owner"]);
+    const desc = pickString(fm, ["desc", "description", "summary", "intro", "introduction"]);
     return {
-      meta: fm,
-      title: (typeof fm.title === "string" && fm.title) || fileNameTitle(filePath),
+      meta: fm as FrontMatter,
+      title,
       tags: tags.length ? tags : [UNCATEGORIZED_TAG],
-      author: typeof fm.author === "string" ? fm.author : undefined,
-      desc: typeof fm.desc === "string" ? fm.desc : undefined,
+      author,
+      desc,
       body: parsed.content.trimStart(),
-      hadFrontmatter: tags.length > 0 || !!fm.author || !!fm.desc || !!fm.title,
+      hadFrontmatter: tags.length > 0 || !!author || !!desc || !!pickString(fm, ["title", "name"]),
     };
   } catch {
     return {
@@ -179,14 +194,14 @@ export async function fetchSource(source: Source, tokens: Tokens): Promise<Fetch
   const parsed = parseRepoUrl(source.url);
   if (!parsed) return { items: [] };
   const { host, owner, repo } = parsed;
-  const branch = source.branch ?? parsed.branch ?? (await getDefaultBranch(host, owner, repo, tokens));
+  const preferred = source.branch ?? parsed.branch;
   const subdir = (source.subdir ?? parsed.subdir ?? "").replace(/^\/+|\/+$/g, "");
 
-  const cacheKey = `src:${source.id}:${branch}:${subdir}`;
-  const cached = getCached<FetchSourceResult>(cacheKey);
-  if (cached) return cached;
+  const cacheKey = `src:v4:${source.id}:${preferred ?? ""}:${subdir}`;
+  const cached = await cacheGet<FetchSourceResult>(cacheKey);
+  if (cached && Array.isArray(cached.items)) return cached;
 
-  const files = await listMdFiles(host, owner, repo, branch, tokens);
+  const { files, branch } = await listMdFilesAndBranch(host, owner, repo, preferred, tokens);
   const scoped = subdir ? files.filter((f) => f.path.startsWith(subdir + "/") || f.path === subdir) : files;
 
   const readmeFile = scoped.find((f) => isRootReadme(f.path, subdir));
@@ -228,23 +243,31 @@ export async function fetchSource(source: Source, tokens: Tokens): Promise<Fetch
     items: items.filter((x): x is PromptItem => !!x),
     readme,
   };
-  setCached(cacheKey, result);
+  await cacheSet(cacheKey, result);
   return result;
 }
 
 export async function fetchAllSources(
   sources: Source[],
   tokens: Tokens,
-): Promise<{ items: PromptItem[]; readmes: Record<string, string> }> {
+): Promise<{ items: PromptItem[]; readmes: Record<string, string>; errors: Record<string, string> }> {
   const results = await Promise.all(
     sources.map((s) =>
-      fetchSource(s, tokens).catch(() => ({ items: [] as PromptItem[] }) as FetchSourceResult),
+      fetchSource(s, tokens)
+        .then((r) => ({ r, error: undefined as string | undefined }))
+        .catch((e: unknown) => {
+          const msg = e instanceof Error ? e.message : String(e);
+          console.error("[prompts] fetchSource failed", s.url, msg);
+          return { r: { items: [] as PromptItem[] } as FetchSourceResult, error: msg };
+        }),
     ),
   );
-  const items = results.flatMap((r) => r.items);
+  const items = results.flatMap(({ r }) => (Array.isArray(r?.items) ? r.items : []));
   const readmes: Record<string, string> = {};
-  results.forEach((r, i) => {
-    if (r.readme) readmes[sources[i].id] = r.readme;
+  const errors: Record<string, string> = {};
+  results.forEach(({ r, error }, i) => {
+    if (r?.readme) readmes[sources[i].id] = r.readme;
+    if (error) errors[sources[i].id] = error;
   });
-  return { items, readmes };
+  return { items, readmes, errors };
 }

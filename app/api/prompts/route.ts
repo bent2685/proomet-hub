@@ -10,15 +10,20 @@ type Body = { sources: Source[]; settings?: Settings; refresh?: boolean };
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as Body;
-    if (body.refresh) invalidateCache();
-    const { items, readmes } = await fetchAllSources(body.sources ?? [], {
+    if (body.refresh) await invalidateCache();
+    const { items, readmes, errors } = await fetchAllSources(body.sources ?? [], {
       github: body.settings?.githubToken,
       gitee: body.settings?.giteeToken,
     });
-    return NextResponse.json({ items, readmes });
+    return NextResponse.json({ items, readmes, errors });
   } catch (err) {
     return NextResponse.json(
-      { items: [], readmes: {}, error: err instanceof Error ? err.message : "unknown" },
+      {
+        items: [],
+        readmes: {},
+        errors: {},
+        error: err instanceof Error ? err.message : "unknown",
+      },
       { status: 200 },
     );
   }
