@@ -1,8 +1,11 @@
 "use client";
 
 import { create } from "zustand";
-import { storage } from "@/lib/storage/client";
+import { storage, resolveMode } from "@/lib/storage/client";
+import { DEFAULT_SOURCES } from "@/lib/defaults";
 import type { Favorite, PromptItem, Settings, Source } from "@/lib/types";
+
+const SEEDED_KEY = "proomet:seeded";
 
 type State = {
   sources: Source[];
@@ -42,12 +45,30 @@ export const useStore = create<State>((set, get) => ({
 
   async hydrate() {
     if (get().hydrated) return;
-    const [sources, favorites, settings] = await Promise.all([
+    const [sources, favorites, settings, mode] = await Promise.all([
       storage.getSources(),
       storage.getFavorites(),
       storage.getSettings(),
+      resolveMode(),
     ]);
-    set({ sources, favorites, settings, hydrated: true });
+
+    let effectiveSources = sources;
+    if (
+      mode === "client" &&
+      sources.length === 0 &&
+      typeof window !== "undefined" &&
+      !window.localStorage.getItem(SEEDED_KEY)
+    ) {
+      effectiveSources = DEFAULT_SOURCES.map((s) => ({
+        ...s,
+        id: Math.random().toString(36).slice(2, 10),
+        addedAt: Date.now(),
+      }));
+      await storage.setSources(effectiveSources);
+      window.localStorage.setItem(SEEDED_KEY, "1");
+    }
+
+    set({ sources: effectiveSources, favorites, settings, hydrated: true });
     await get().reloadPrompts();
   },
 
