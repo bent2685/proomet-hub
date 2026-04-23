@@ -7,3 +7,7 @@ dist
 *.log
 .DS_Store
 data/
+
+# editor swap / Claude agent scratch
+*.swp
+CLAUDE.md
