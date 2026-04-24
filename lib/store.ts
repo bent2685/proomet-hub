@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import { storage, resolveMode } from "@/lib/storage/client";
 import { DEFAULT_SOURCES } from "@/lib/defaults";
-import type { Favorite, PromptItem, Settings, Source } from "@/lib/types";
+import type { ArticleItem, Favorite, PromptItem, Settings, Source } from "@/lib/types";
 
 const SEEDED_KEY = "proomet:seeded";
 
@@ -12,6 +12,7 @@ type State = {
   favorites: Favorite[];
   settings: Settings;
   items: PromptItem[];
+  articles: ArticleItem[];
   readmes: Record<string, string>;
   errors: Record<string, string>;
   loading: boolean;
@@ -38,6 +39,7 @@ export const useStore = create<State>((set, get) => ({
   favorites: [],
   settings: {},
   items: [],
+  articles: [],
   readmes: {},
   errors: {},
   loading: false,
@@ -75,7 +77,7 @@ export const useStore = create<State>((set, get) => ({
   async reloadPrompts(opts) {
     const { sources, settings } = get();
     if (sources.length === 0) {
-      set({ items: [], readmes: {}, errors: {} });
+      set({ items: [], articles: [], readmes: {}, errors: {} });
       return;
     }
     set({ loading: true });
@@ -87,11 +89,13 @@ export const useStore = create<State>((set, get) => ({
       });
       const json = (await res.json()) as {
         items: PromptItem[];
+        articles?: ArticleItem[];
         readmes?: Record<string, string>;
         errors?: Record<string, string>;
       };
       set({
         items: json.items ?? [],
+        articles: json.articles ?? [],
         readmes: json.readmes ?? {},
         errors: json.errors ?? {},
       });

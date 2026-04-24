@@ -11,15 +11,16 @@ export async function POST(req: Request) {
   try {
     const body = (await req.json()) as Body;
     if (body.refresh) await invalidateCache();
-    const { items, readmes, errors } = await fetchAllSources(body.sources ?? [], {
+    const { items, articles, readmes, errors } = await fetchAllSources(body.sources ?? [], {
       github: body.settings?.githubToken || process.env.GITHUB_TOKEN || undefined,
       gitee: body.settings?.giteeToken || process.env.GITEE_TOKEN || undefined,
     });
-    return NextResponse.json({ items, readmes, errors });
+    return NextResponse.json({ items, articles, readmes, errors });
   } catch (err) {
     return NextResponse.json(
       {
         items: [],
+        articles: [],
         readmes: {},
         errors: {},
         error: err instanceof Error ? err.message : "unknown",

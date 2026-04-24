@@ -1,6 +1,6 @@
 "use client";
 
-import { Star, User } from "lucide-react";
+import { Star, User, Clock } from "lucide-react";
 import type { PromptItem } from "@/lib/types";
 import { useStore } from "@/lib/store";
 import clsx from "clsx";
@@ -53,6 +53,12 @@ export function PromptCard({ item, onOpen }: { item: PromptItem; onOpen: (id: st
           <span className="inline-flex items-center gap-1">
             <User className="size-3" />
             {item.author}
+          </span>
+        )}
+        {item.datetime && (
+          <span className="inline-flex items-center gap-1">
+            <Clock className="size-3" />
+            {item.datetime}
           </span>
         )}
         <span className="truncate ml-auto">{item.sourceLabel}</span>

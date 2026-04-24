@@ -1,5 +1,13 @@
 import matter from "gray-matter";
-import { UNCATEGORIZED_TAG, type FrontMatter, type PromptItem, type Source } from "@/lib/types";
+import {
+  ARTICLES_SUBDIR,
+  ARTICLE_CATEGORY_NONE,
+  UNCATEGORIZED_TAG,
+  type ArticleItem,
+  type FrontMatter,
+  type PromptItem,
+  type Source,
+} from "@/lib/types";
 import { cacheGet, cacheSet, cacheInvalidate } from "@/lib/cache";
 
 export async function invalidateCache(prefix?: string) {
@@ -147,6 +155,40 @@ function pickTags(fm: Record<string, unknown>): string[] {
   return [];
 }
 
+function formatDatetime(ms: number): string {
+  const d = new Date(ms);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
+}
+
+function parseDatetime(input: unknown): { datetime?: string; datetimeMs?: number } {
+  if (input == null || input === "") return {};
+  if (input instanceof Date) {
+    const ms = input.getTime();
+    if (isNaN(ms)) return {};
+    return { datetime: formatDatetime(ms), datetimeMs: ms };
+  }
+  if (typeof input === "number") {
+    const ms = input;
+    if (isNaN(ms)) return {};
+    return { datetime: formatDatetime(ms), datetimeMs: ms };
+  }
+  if (typeof input !== "string") return {};
+  const raw = input.trim();
+  if (!raw) return {};
+  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$/.exec(raw);
+  if (m) {
+    const [, y, mo, d, hh = "00", mm = "00", ss = "00"] = m;
+    const iso = `${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}T${hh.padStart(2, "0")}:${mm.padStart(2, "0")}:${ss.padStart(2, "0")}Z`;
+    const ms = new Date(iso).getTime();
+    if (isNaN(ms)) return { datetime: raw };
+    return { datetime: formatDatetime(ms), datetimeMs: ms };
+  }
+  const ms = new Date(raw).getTime();
+  if (isNaN(ms)) return { datetime: raw };
+  return { datetime: formatDatetime(ms), datetimeMs: ms };
+}
+
 function fileNameTitle(filePath: string): string {
   const base = filePath.split("/").pop() ?? filePath;
   return base.replace(/\.md$/i, "");
@@ -160,12 +202,15 @@ function parseMd(raw: string, filePath: string) {
     const title = pickString(fm, ["title", "name"]) ?? fileNameTitle(filePath);
     const author = pickString(fm, ["author", "by", "creator", "owner"]);
     const desc = pickString(fm, ["desc", "description", "summary", "intro", "introduction"]);
+    const dt = parseDatetime(fm["datetime"] ?? fm["date"] ?? fm["publishedAt"] ?? fm["published"]);
     return {
       meta: fm as FrontMatter,
       title,
       tags: tags.length ? tags : [UNCATEGORIZED_TAG],
       author,
       desc,
+      datetime: dt.datetime,
+      datetimeMs: dt.datetimeMs,
       body: parsed.content.trimStart(),
       hadFrontmatter: tags.length > 0 || !!author || !!desc || !!pickString(fm, ["title", "name"]),
     };
@@ -176,13 +221,15 @@ function parseMd(raw: string, filePath: string) {
       tags: [UNCATEGORIZED_TAG],
       author: undefined,
       desc: undefined,
+      datetime: undefined,
+      datetimeMs: undefined,
       body: raw,
       hadFrontmatter: false,
     };
   }
 }
 
-export type FetchSourceResult = { items: PromptItem[]; readme?: string };
+export type FetchSourceResult = { items: PromptItem[]; articles: ArticleItem[]; readme?: string };
 
 function isRootReadme(filePath: string, rootDir: string): boolean {
   const prefix = rootDir ? `${rootDir}/` : "";
@@ -192,38 +239,48 @@ function isRootReadme(filePath: string, rootDir: string): boolean {
 
 export async function fetchSource(source: Source, tokens: Tokens): Promise<FetchSourceResult> {
   const parsed = parseRepoUrl(source.url);
-  if (!parsed) return { items: [] };
+  if (!parsed) return { items: [], articles: [] };
   const { host, owner, repo } = parsed;
   const preferred = source.branch ?? parsed.branch;
   const subdir = (source.subdir ?? parsed.subdir ?? "").replace(/^\/+|\/+$/g, "");
 
-  const cacheKey = `src:v4:${source.id}:${preferred ?? ""}:${subdir}`;
+  const cacheKey = `src:v7:${source.id}:${preferred ?? ""}:${subdir}`;
   const cached = await cacheGet<FetchSourceResult>(cacheKey);
-  if (cached && Array.isArray(cached.items)) return cached;
+  if (cached && Array.isArray(cached.items) && Array.isArray(cached.articles)) return cached;
 
   const { files, branch } = await listMdFilesAndBranch(host, owner, repo, preferred, tokens);
-  const scoped = subdir ? files.filter((f) => f.path.startsWith(subdir + "/") || f.path === subdir) : files;
+
+  const articleFiles = files.filter(
+    (f) => f.path.startsWith(ARTICLES_SUBDIR + "/") && !isRootReadme(f.path, ARTICLES_SUBDIR),
+  );
+  const nonArticleFiles = files.filter((f) => !f.path.startsWith(ARTICLES_SUBDIR + "/"));
+
+  const scoped = subdir
+    ? nonArticleFiles.filter((f) => f.path.startsWith(subdir + "/") || f.path === subdir)
+    : nonArticleFiles;
 
   const readmeFile = scoped.find((f) => isRootReadme(f.path, subdir));
   const promptFiles = scoped.filter((f) => !isRootReadme(f.path, subdir));
 
   const label = source.label ?? `${owner}/${repo}`;
 
-  const fetchOne = async (f: TreeFile): Promise<PromptItem | null> => {
+  const fetchPrompt = async (f: TreeFile): Promise<PromptItem | null> => {
     try {
       const raw = await fetchRaw(host, owner, repo, branch, f.path, tokens);
-      const parsed = parseMd(raw, f.path);
+      const md = parseMd(raw, f.path);
       return {
         id: `${source.id}:${f.path}`,
         sourceId: source.id,
         sourceLabel: label,
         path: f.path,
-        title: parsed.title,
-        tags: parsed.tags,
-        author: parsed.author,
-        desc: parsed.desc,
-        meta: parsed.meta,
-        body: parsed.body,
+        title: md.title,
+        tags: md.tags,
+        author: md.author,
+        desc: md.desc,
+        datetime: md.datetime,
+        datetimeMs: md.datetimeMs,
+        meta: md.meta,
+        body: md.body,
         sha: f.sha,
       };
     } catch {
@@ -231,8 +288,39 @@ export async function fetchSource(source: Source, tokens: Tokens): Promise<Fetch
     }
   };
 
-  const [rawItems, readme] = await Promise.all([
-    Promise.all(promptFiles.map(fetchOne)),
+  const fetchArticle = async (f: TreeFile): Promise<ArticleItem | null> => {
+    try {
+      const raw = await fetchRaw(host, owner, repo, branch, f.path, tokens);
+      const md = parseMd(raw, f.path);
+      const rel = f.path.slice(ARTICLES_SUBDIR.length + 1);
+      const segs = rel.split("/");
+      const category = segs.slice(0, -1);
+      const categoryKey = category.length ? category.join("/") : ARTICLE_CATEGORY_NONE;
+      return {
+        id: `${source.id}:${f.path}`,
+        sourceId: source.id,
+        sourceLabel: label,
+        path: f.path,
+        title: md.title,
+        tags: md.tags,
+        author: md.author,
+        desc: md.desc,
+        datetime: md.datetime,
+        datetimeMs: md.datetimeMs,
+        meta: md.meta,
+        body: md.body,
+        sha: f.sha,
+        category,
+        categoryKey,
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  const [rawItems, rawArticles, readme] = await Promise.all([
+    Promise.all(promptFiles.map(fetchPrompt)),
+    Promise.all(articleFiles.map(fetchArticle)),
     readmeFile
       ? fetchRaw(host, owner, repo, branch, readmeFile.path, tokens).catch(() => undefined)
       : Promise.resolve(undefined),
@@ -240,8 +328,10 @@ export async function fetchSource(source: Source, tokens: Tokens): Promise<Fetch
 
   const items: PromptItem[] = [];
   for (const it of rawItems) if (it) items.push(it);
+  const articles: ArticleItem[] = [];
+  for (const a of rawArticles) if (a) articles.push(a);
 
-  const result: FetchSourceResult = { items, readme };
+  const result: FetchSourceResult = { items, articles, readme };
   await cacheSet(cacheKey, result);
   return result;
 }
@@ -249,7 +339,12 @@ export async function fetchSource(source: Source, tokens: Tokens): Promise<Fetch
 export async function fetchAllSources(
   sources: Source[],
   tokens: Tokens,
-): Promise<{ items: PromptItem[]; readmes: Record<string, string>; errors: Record<string, string> }> {
+): Promise<{
+  items: PromptItem[];
+  articles: ArticleItem[];
+  readmes: Record<string, string>;
+  errors: Record<string, string>;
+}> {
   const results = await Promise.all(
     sources.map((s) =>
       fetchSource(s, tokens)
@@ -257,16 +352,20 @@ export async function fetchAllSources(
         .catch((e: unknown) => {
           const msg = e instanceof Error ? e.message : String(e);
           console.error("[prompts] fetchSource failed", s.url, msg);
-          return { r: { items: [] as PromptItem[] } as FetchSourceResult, error: msg };
+          return {
+            r: { items: [] as PromptItem[], articles: [] as ArticleItem[] } as FetchSourceResult,
+            error: msg,
+          };
         }),
     ),
   );
   const items = results.flatMap(({ r }) => (Array.isArray(r?.items) ? r.items : []));
+  const articles = results.flatMap(({ r }) => (Array.isArray(r?.articles) ? r.articles : []));
   const readmes: Record<string, string> = {};
   const errors: Record<string, string> = {};
   results.forEach(({ r, error }, i) => {
     if (r?.readme) readmes[sources[i].id] = r.readme;
     if (error) errors[sources[i].id] = error;
   });
-  return { items, readmes, errors };
+  return { items, articles, readmes, errors };
 }

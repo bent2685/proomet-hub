@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Search, Github, Users, Star, Settings as SettingsIcon } from "lucide-react";
+import { Search, Github, Users, Star, Settings as SettingsIcon, BookOpen } from "lucide-react";
 import { CommandPalette } from "@/components/command-palette";
 import { Hydrate } from "@/components/hydrate";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -33,6 +33,7 @@ export function Header() {
           </Link>
           <nav className="hidden md:flex items-center gap-1 ml-2 text-sm text-fg-muted">
             <NavLink href="/sources" icon={<Github className="size-4" />}>Sources</NavLink>
+            <NavLink href="/articles" icon={<BookOpen className="size-4" />}>Articles</NavLink>
             <NavLink href="/authors" icon={<Users className="size-4" />}>Authors</NavLink>
             <NavLink href="/favorites" icon={<Star className="size-4" />}>Favorites</NavLink>
           </nav>

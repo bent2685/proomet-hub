@@ -40,8 +40,18 @@ export type PromptItem = {
   body: string;
   sha?: string;
   updatedAt?: number;
+  datetime?: string;
+  datetimeMs?: number;
 };
 
 export type StorageMode = "fs" | "client";
 
 export const UNCATEGORIZED_TAG = "其他";
+
+export const ARTICLES_SUBDIR = "hub_posts";
+export const ARTICLE_CATEGORY_NONE = "__none__";
+
+export type ArticleItem = PromptItem & {
+  category: string[];
+  categoryKey: string;
+};

@@ -7,11 +7,27 @@ import { User } from "lucide-react";
 
 export default function AuthorsPage() {
   const items = useStore((s) => s.items);
+  const articles = useStore((s) => s.articles);
   const authors = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const it of items) if (it.author) map.set(it.author, (map.get(it.author) ?? 0) + 1);
-    return [...map.entries()].sort((a, b) => b[1] - a[1]);
-  }, [items]);
+    const map = new Map<string, { prompts: number; articles: number }>();
+    for (const it of items) {
+      if (it.author) {
+        const cur = map.get(it.author) ?? { prompts: 0, articles: 0 };
+        cur.prompts += 1;
+        map.set(it.author, cur);
+      }
+    }
+    for (const a of articles) {
+      if (a.author) {
+        const cur = map.get(a.author) ?? { prompts: 0, articles: 0 };
+        cur.articles += 1;
+        map.set(a.author, cur);
+      }
+    }
+    return [...map.entries()].sort(
+      (a, b) => b[1].prompts + b[1].articles - (a[1].prompts + a[1].articles),
+    );
+  }, [items, articles]);
 
   return (
     <div className="space-y-6">
@@ -31,7 +47,10 @@ export default function AuthorsPage() {
               </div>
               <div className="min-w-0 flex-1">
                 <div className="font-medium truncate">{a}</div>
-                <div className="text-xs text-fg-subtle">{n} prompts</div>
+                <div className="text-xs text-fg-subtle">
+                  {n.prompts} prompts
+                  {n.articles > 0 && ` · ${n.articles} articles`}
+                </div>
               </div>
             </Link>
           ))}

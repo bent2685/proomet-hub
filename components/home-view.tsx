@@ -9,7 +9,7 @@ import { Hero } from "@/components/hero";
 import { PromptDetail } from "@/components/prompt-detail";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { AlertTriangle, RefreshCw } from "lucide-react";
+import { AlertTriangle, RefreshCw, ArrowDownWideNarrow, ArrowUpWideNarrow } from "lucide-react";
 
 export function HomeView() {
   const items = useStore((s) => s.items);
@@ -27,6 +27,7 @@ export function HomeView() {
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<"none" | "desc" | "asc">("none");
 
   useEffect(() => {
     if (urlTag) setSelected(new Set([urlTag]));
@@ -40,7 +41,7 @@ export function HomeView() {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return items.filter((it) => {
+    const list = items.filter((it) => {
       if (selected.size > 0) {
         const hit = it.tags.some((t) => selected.has(t));
         if (!hit) return false;
@@ -51,7 +52,17 @@ export function HomeView() {
       }
       return true;
     });
-  }, [items, selected, query]);
+    if (sort === "none") return list;
+    const dir = sort === "asc" ? 1 : -1;
+    return [...list].sort((a, b) => {
+      const av = a.datetimeMs;
+      const bv = b.datetimeMs;
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      return (av - bv) * dir;
+    });
+  }, [items, selected, query, sort]);
 
   function toggle(tag: string) {
     setSelected((prev) => (prev.has(tag) ? new Set() : new Set([tag])));
@@ -115,6 +126,26 @@ export function HomeView() {
                 placeholder="搜索标题 / 描述 / tag / 作者 / 内容…"
                 className="flex-1 h-10 px-3 rounded-md bg-bg-elevated border border-border focus:border-border-strong outline-none text-sm"
               />
+              <button
+                onClick={() =>
+                  setSort((s) => (s === "none" ? "desc" : s === "desc" ? "asc" : "none"))
+                }
+                title={
+                  sort === "none"
+                    ? "按发布时间排序：当前 默认"
+                    : sort === "desc"
+                      ? "按发布时间：新 → 旧"
+                      : "按发布时间：旧 → 新"
+                }
+                className="inline-flex items-center gap-1.5 h-10 px-3 rounded-md border border-border hover:border-border-strong bg-bg-elevated text-sm"
+              >
+                {sort === "asc" ? (
+                  <ArrowUpWideNarrow className="size-4" />
+                ) : (
+                  <ArrowDownWideNarrow className="size-4" />
+                )}
+                {sort === "none" ? "时间" : sort === "desc" ? "新→旧" : "旧→新"}
+              </button>
               <button
                 onClick={() => reload({ refresh: true })}
                 disabled={loading}
